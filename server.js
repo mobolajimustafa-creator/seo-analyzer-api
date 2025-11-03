@@ -58,7 +58,7 @@ app.post('/api/seo-analysis', async (req, res) => {
       }],
       {
         headers: {
-            'Authorization': 'Basic ' + Buffer.from(`${process.env.DATAFORSEO_API_LOGIN}:${process.env.DATAFORSEO_API_PASSWORD}`).toString('base64'),
+            'Authorization': 'Basic ' + process.env.DATAFORSEO_API_AUTH,
             'Content-Type': 'application/json'
         }
       }
