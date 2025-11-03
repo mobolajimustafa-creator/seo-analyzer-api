@@ -64,8 +64,12 @@ app.post('/api/seo-analysis', async (req, res) => {
       }
     );
 
-    const task = dataForSEOResponse.data.tasks.find(t => t.status_code === 200);
-    const serpData = task ? task.result[0].items : []; // Assuming 'items' holds the SERP resultsconst serpData = dataForSEOResponse.data.tasks[0].result;
+    const task = dataForSEOResponse.data.tasks[0];
+
+// B. Check if the task has a result array and if the result has an items array
+const serpData = (task && task.result && task.result.length > 0 && task.result[0].items) 
+    ? task.result[0].items 
+    : []; // Fallback to an empty array if not found
     
     // ------------------------------------------------------------------
     // B. ANALYZE DATA with OpenAI
