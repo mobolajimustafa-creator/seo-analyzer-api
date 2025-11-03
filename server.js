@@ -9,7 +9,7 @@ const OpenAI = require('openai'); // Use the official SDK
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATAFORSEO_URL = 'https://api.dataforseo.com/v3/'; // Example base URL
+const DATAFORSEO_URL = 'https://api.dataforseo.com/v3'; // Example base URL
 
 // 2. Middleware
 // Allow JSON body parsing
@@ -64,7 +64,8 @@ app.post('/api/seo-analysis', async (req, res) => {
       }
     );
 
-    const serpData = dataForSEOResponse.data.tasks[0].result;
+    const task = dataForSEOResponse.data.tasks.find(t => t.status_code === 200);
+    const serpData = task ? task.result[0].items : []; // Assuming 'items' holds the SERP resultsconst serpData = dataForSEOResponse.data.tasks[0].result;
     
     // ------------------------------------------------------------------
     // B. ANALYZE DATA with OpenAI
