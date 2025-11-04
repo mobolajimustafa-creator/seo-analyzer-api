@@ -45,7 +45,6 @@ app.post('/api/seo-analysis', async (req, res) => {
     // A. FETCH DATA from DataForSEO
     // ------------------------------------------------------------------
     
-    // Example: Fetch SERP results for a keyword
     const dataForSEOResponse = await axios.post(
       `${DATAFORSEO_URL}/serp/google/organic/live/advanced`, 
       [{
@@ -61,15 +60,30 @@ app.post('/api/seo-analysis', async (req, res) => {
       }
     );
 
+    // --- FIX/IMPROVEMENT: Check for top-level DataForSEO errors ---
+    const responseData = dataForSEOResponse.data;
+
+    if (responseData.status_code !== 20000) {
+        console.error("DataForSEO API Error:", responseData.status_message, responseData.status_code);
+        // Throw an error to be caught by the outer catch block
+        throw new Error(`DataForSEO API Error: ${responseData.status_code} - ${responseData.status_message}`);
+    }
+
     // Check for successful task creation and get the first task object
-    const task = dataForSEOResponse.data.tasks[0];
+    // Guard against empty tasks array
+    if (!responseData.tasks || responseData.tasks.length === 0) {
+        console.warn("DataForSEO returned a successful status but zero tasks. Check request parameters.");
+        // Continue, but serpData will be empty, which is handled below.
+    }
+    
+    const task = responseData.tasks ? responseData.tasks[0] : null;
 
     // ------------------------------------------------------------------
     // B. EXTRACT SERP DATA (The Corrected Robust Logic)
     // ------------------------------------------------------------------
     let serpData = [];
     if (task && task.result) {
-        // *** CRITICAL FIX: Use .find() to locate the 'organic' results object ***
+        // CRITICAL FIX: Use .find() to locate the 'organic' results object
         const organicResult = task.result.find(
             resultItem => resultItem.item_type === 'organic' && Array.isArray(resultItem.items)
         );
@@ -87,8 +101,13 @@ app.post('/api/seo-analysis', async (req, res) => {
     // We slice the data to get the top 5 results and stringify it for the prompt
     const dataSummary = JSON.stringify(serpData.slice(0, 5), null, 2); 
     
+    // --- IMPROVEMENT: Modify prompt to handle empty data gracefully ---
+    const competitorDataMessage = serpData.length > 0 
+        ? `The top competitor data is: ${dataSummary}.`
+        : `No competitor data was found in the SERP results. Provide general, foundational SEO advice for this keyword.`;
+
     const prompt = `Analyze the following SERP data for the keyword "${keyword}" in the domain "${domain}".
-    The top competitor data is: ${dataSummary}.
+    ${competitorDataMessage}
     
     Provide a brief, actionable SEO strategy for this website (${domain}) to rank higher.
     The output should be a single, professional paragraph.`;
@@ -114,10 +133,13 @@ app.post('/api/seo-analysis', async (req, res) => {
 
   } catch (error) {
     console.error("API Processing Error:", error.message);
+    // Check for specific Axios error response from DataForSEO
+    const details = error.response ? error.response.data : error.message;
+
     res.status(500).json({ 
       success: false, 
       error: 'Failed to process SEO analysis.',
-      details: error.message 
+      details: details
     });
   }
 });
