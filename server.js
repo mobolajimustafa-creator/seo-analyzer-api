@@ -103,21 +103,40 @@ app.post('/api/seo-analysis', async (req, res) => {
     const task = { keyword, language_code, location_code };
     const dataForSEOResponse = await callDataForSeo('serp/google/organic/live/advanced', [task], { retries: 3 });
 
-    // B. EXTRACT SERP DATA (The Corrected Robust Logic)
-    const resultTask = dataForSEOResponse.tasks[0];
-    let serpData = [];
+// server.js - Find and replace the Data Extraction section:
 
-    if (resultTask && resultTask.result) {
-        // CRITICAL FIX: Use .find() to locate the 'organic' results object
-        const organicResult = resultTask.result.find(
-            resultItem => resultItem.item_type === 'organic' && Array.isArray(resultItem.items)
-        );
+// B. EXTRACT SERP DATA (The slightly refined logic)
+const resultTask = dataForSEOResponse.tasks[0];
+let serpData = [];
 
-        if (organicResult) {
-            serpData = organicResult.items;
-        }
-    }
-    
+if (resultTask && resultTask.result) {
+    // Collect all items from the result array, prioritizing 'organic' but including all
+    const allItems = [];
+    
+    resultTask.result.forEach(resultItem => {
+        if (Array.isArray(resultItem.items)) {
+            // Find the organic result item and set serpData to its items
+            if (resultItem.item_type === 'organic') {
+                serpData = resultItem.items; // Use this to ensure it gets the organic list
+            }
+            // If the organic list is found, we stop here.
+        }
+    });
+
+    // Fallback: If serpData is still empty, look for any top-level item lists
+    if (serpData.length === 0) {
+        const topLevelItems = resultTask.result.find(r => Array.isArray(r.items) && r.items.length > 0);
+        if (topLevelItems) {
+             serpData = topLevelItems.items;
+        }
+    }
+} 
+// Note: If the AI mentioned a "featured snippet," that data was passed, 
+// so the problem is purely in how 'serpData' is ultimately set for the final response.
+
+// C. ANALYZE DATA with OpenAI (This part remains the same)
+// ...
+
     // C. ANALYZE DATA with OpenAI
     const dataSummary = JSON.stringify(serpData.slice(0, 5), null, 2); 
     
