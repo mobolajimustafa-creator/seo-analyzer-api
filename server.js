@@ -9,10 +9,10 @@ app.use(express.json());
 
 // Load credentials (Assuming these are handled elsewhere or provided via environment variables)
 // IMPORTANT: For production, you MUST use process.env.*
-const DATA_FOR_SEO_LOGIN = "your_dataforseo_login"; // Replace with process.env.DATA_FOR_SEO_LOGIN
-const DATA_FOR_SEO_PASSWORD = "your_dataforseo_password"; // Replace with process.env.DATA_FOR_SEO_PASSWORD
-const OPENAI_API_KEY = "your_openai_api_key"; // <-- NEW: Replace with process.env.OPENAI_API_KEY
-
+// Change these lines in server.js
+const DATA_FOR_SEO_LOGIN = process.env.DATA_FOR_SEO_LOGIN; // <-- Correct
+const DATA_FOR_SEO_PASSWORD = process.env.DATA_FOR_SEO_PASSWORD; // <-- Correct
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY; // <-- Correct
 // --- Core DataForSEO Helper Function ---
 async function callDataForSeo(endpoint, tasksArray, options = {}) {
     const { retries = 0 } = options;
