@@ -1,230 +1,187 @@
-// server.js
-require('dotenv').config();
+// server.js (Now includes DataForSEO and OpenAI Integration)
 const express = require('express');
-const cors = require('cors');
 const axios = require('axios');
-const OpenAI = require('openai');
-
 const app = express();
-const PORT = process.env.PORT || 3000;
-const DATAFORSEO_URL = process.env.DATAFORSEO_URL || 'https://api.dataforseo.com/v3';
+const port = 3000;
 
-// Initialize OpenAI Client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-// Middleware
+// Middleware to parse JSON bodies
 app.use(express.json());
-app.use(cors({
-  origin: process.env.WORDPRESS_URL || '*',
-  optionsSuccessStatus: 200
-}));
 
-// --- Helpers ---
+// Load credentials (Assuming these are handled elsewhere or provided via environment variables)
+const DATA_FOR_SEO_LOGIN = "your_dataforseo_login"; // Replace with process.env.DATA_FOR_SEO_LOGIN
+const DATA_FOR_SEO_PASSWORD = "your_dataforseo_password"; // Replace with process.env.DATA_FOR_SEO_PASSWORD
+const OPENAI_API_KEY = "your_openai_api_key"; // <-- NEW: Replace with process.env.OPENAI_API_KEY
 
-// Build Basic Authorization header.
-function getDataForSeoAuthHeader() {
-  const login = process.env.DATAFORSEO_LOGIN;
-  const password = process.env.DATAFORSEO_PASSWORD;
-  const precomputed = process.env.DATAFORSEO_API_AUTH;
+// --- Core DataForSEO Helper Function ---
+async function callDataForSeo(endpoint, tasksArray, options = {}) {
+    const { retries = 0 } = options;
+    const url = `https://api.dataforseo.com/v3/${endpoint}`;
+    
+    // Encode credentials for Basic Auth
+    const auth = Buffer.from(`${DATA_FOR_SEO_LOGIN}:${DATA_FOR_SEO_PASSWORD}`).toString('base64');
+    
+    // FIX: The HTTP body must be the tasksArray directly.
+    const requestBody = tasksArray;
 
-  if (login && password) {
-    const cred = Buffer.from(`${login}:${password}`).toString('base64');
-    return `Basic ${cred}`;
-  }
+    const config = {
+        method: 'post',
+        url: url,
+        headers: { 
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/json'
+        },
+        // The body is the array of tasks, as requested by DataForSEO Support
+        data: JSON.stringify(requestBody) 
+    };
 
-  if (precomputed) {
-    const cleaned = precomputed.replace(/^(Basic\s*)/i, '');
-    return `Basic ${cleaned}`;
-  }
-
-  throw new Error('Missing DataForSEO credentials. Set DATAFORSEO_LOGIN & DATAFORSEO_PASSWORD or DATAFORSEO_API_AUTH in env.');
+    for (let i = 0; i <= retries; i++) {
+        try {
+            const response = await axios(config);
+            return response.data;
+        } catch (error) {
+            console.error(`DataForSEO Attempt ${i + 1} failed: ${error.message}`);
+            if (i === retries) {
+                return { 
+                    status_code: 500, 
+                    status_message: `Internal Server Error: DataForSEO request failed: ${error.message}` 
+                };
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); 
+        }
+    }
 }
 
-// Call DataForSEO with retries and exponential backoff
-async function callDataForSeo(endpointPath, tasksArray = [], opts = {}) {
-  const url = `${DATAFORSEO_URL.replace(/\/+$/, '')}/${endpointPath.replace(/^\/+/, '')}`;
-  const body = { tasks: tasksArray };
-  const headers = {
-    Authorization: getDataForSeoAuthHeader(),
-    'Content-Type': 'application/json'
-  };
+// --- Core OpenAI Helper Function ---
+async function callOpenAI(systemPrompt, userPrompt, options = {}) {
+    if (!OPENAI_API_KEY || OPENAI_API_KEY.includes('your_openai_api_key')) {
+        console.warn("OpenAI API key not configured. Skipping analysis.");
+        return "[OpenAI Analysis Skipped: API Key not set]";
+    }
 
-  const maxAttempts = opts.retries || 3;
-  const baseDelay = opts.baseDelayMs || 500;
-  let lastErr;
+    const { model = 'gpt-4o-mini', retries = 3 } = options;
+    const url = 'https://api.openai.com/v1/chat/completions';
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const response = await axios.post(url, body, { headers, timeout: opts.timeout || 30000 });
+    const config = {
+        method: 'post',
+        url: url,
+        headers: { 
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Type': 'application/json'
+        },
+        data: {
+            model: model,
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt }
+            ],
+            temperature: 0.2 // Keep analysis factual and low creativity
+        }
+    };
 
-      // DataForSEO top-level status check
-      if (response.data && response.data.status_code && response.data.status_code !== 20000) {
-        const err = new Error(`DataForSEO API Error: ${response.data.status_code} - ${response.data.status_message}`);
-        err.serverData = response.data;
-        throw err;
-      }
-
-      return response.data;
-    } catch (err) {
-      lastErr = err;
-      const serverData = err.response?.data || err.serverData;
-      console.warn(`DataForSEO request error (attempt ${attempt}):`, serverData || err.message);
-
-      if (attempt === maxAttempts) {
-        const errorToThrow = new Error('DataForSEO request failed after retries: ' + (err.message || 'unknown'));
-        errorToThrow.original = err;
-        errorToThrow.serverData = serverData;
-        throw errorToThrow;
-      }
-
-      const delay = baseDelay * Math.pow(2, attempt - 1);
-      await new Promise(r => setTimeout(r, delay));
-    }
-  }
-
-  throw lastErr || new Error('Unexpected error in callDataForSeo');
+    for (let i = 0; i <= retries; i++) {
+        try {
+            const response = await axios(config);
+            // Return the content of the first choice
+            return response.data.choices[0].message.content;
+        } catch (error) {
+            console.error(`OpenAI Attempt ${i + 1} failed: ${error.message}`);
+            if (i === retries) {
+                return `[OpenAI Analysis Failed: ${error.message}]`;
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); 
+        }
+    }
 }
 
-// Defensive extractor for organic items
-function extractOrganicItemsFromDfResponse(dfData) {
-  if (!dfData || !Array.isArray(dfData.tasks) || dfData.tasks.length === 0) return [];
 
-  const task = dfData.tasks[0];
-  console.log('DataForSEO top-level status:', { status_code: dfData.status_code, status_message: dfData.status_message });
-  console.log('DataForSEO task status:', { status_code: task.status_code, status_message: task.status_message });
-
-  const resultObj = Array.isArray(task.result) && task.result.length > 0 ? task.result[0] : null;
-  if (!resultObj) {
-    console.warn('No result object in DataForSEO task.');
-    return [];
-  }
-
-  let items = Array.isArray(resultObj.items) ? resultObj.items.slice() : [];
-
-  const nestedItems = items.flatMap(it => (it && Array.isArray(it.items) ? it.items : []));
-  if (nestedItems.length > 0) items = items.concat(nestedItems);
-
-  const organic = items.filter(it => {
-    if (!it || typeof it !== 'object') return false;
-    if (it.type === 'organic') return true;
-    if (it.item_type === 'organic') return true;
-    if (Array.isArray(it.item_types) && it.item_types.includes('organic')) return true;
-    return false;
-  });
-
-  return organic.length > 0 ? organic : items;
-}
-
-// --- Routes ---
-
-// Health check
-app.get('/status', (req, res) => {
-  res.json({ message: 'SEO Platform API is running!' });
-});
-
-// Core SEO Analysis Route
+// --- Express Route ---
 app.post('/api/seo-analysis', async (req, res) => {
-  const {
-    domain, // <-- Domain is now OPTIONAL for validation
-    keyword,
-    target_country,
-    location_code: rawLocationCode = 2840,
-    language_code = 'en',
-    device = 'desktop'
-  } = req.body || {};
+    try {
+        const { keyword, location_code, language_code, domain, device = 'desktop' } = req.body;
 
-  // 1. CRITICAL FIX: Ensure location_code is an integer
-  const locationCode = parseInt(rawLocationCode); 
+        // Basic validation
+        if (!keyword || !location_code || !language_code) {
+            return res.status(400).json({ error: 'Missing required parameters: keyword, location_code, and language_code.' });
+        }
+        
+        // Ensure location_code is a number
+        const locationCode = parseInt(location_code, 10);
+        if (isNaN(locationCode)) {
+             return res.status(400).json({ error: 'location_code must be a number.' });
+        }
 
-  // 2. UPDATED VALIDATION: Only keyword is strictly required for the API call
-  if (!keyword) {
-    return res.status(400).json({ error: 'Keyword is required.' });
-  }
+        // 1. CONSTRUCT DATA FOR SEO PAYLOAD (Task Object)
+        const taskPayload = {
+            keyword,
+            location_code: locationCode, 
+            language_code,
+            device
+        };
 
-  try {
-    // A. FETCH DATA from DataForSEO (Endpoint: serp/google/organic/live/advanced)
-    const taskPayload = {
-      keyword,
-      location_code: locationCode, 
-      language_code,
-      device,
-      calculate_rectangles: false,
-    // --- FIELDS REQUIRED FOR DATAFORSEO VALIDATION (FIXES 40503) ---
-      api: 'serp',
-      function: 'live',
-      se: 'google',
-      se_type: 'organic'
-    // ----------------------------------------------------------------
-    };
+        // Add optional domain field if provided
+        if (domain && domain !== 'N/A' && domain.trim() !== '') {
+            taskPayload.domain = domain;
+        }
 
-    const dataForSEOResponse = await callDataForSeo('serp/google/organic/live/advanced', [taskPayload], { retries: 3 });
-    
-    console.log('DataForSEO full response.tasks[0]:', JSON.stringify(dataForSEOResponse.tasks?.[0], null, 2));
-    
-    // Log some diagnostics for Render logs
-    console.log('DataForSEO response version/time/cost:', {
-      version: dataForSEOResponse.version,
-      time: dataForSEOResponse.time,
-      cost: dataForSEOResponse.cost
-    });
+        // 2. FETCH DATA from DataForSEO
+        const dataForSEOResponse = await callDataForSeo('serp/google/organic/live/advanced', [taskPayload], { retries: 3 });
+        
+        // Check for DataForSEO errors
+        const taskStatus = dataForSEOResponse.tasks?.[0]?.status || dataForSEOResponse.status;
+        const taskStatusCode = taskStatus?.code || dataForSEOResponse.status_code;
 
-    // B. EXTRACT SERP DATA
-    const serpData = extractOrganicItemsFromDfResponse(dataForSEOResponse);
-    console.log('Extracted serpData count:', serpData.length);
+        if (taskStatusCode !== 20000) {
+            // Log the error for internal debugging
+            console.error("DataForSEO Task Failed:", taskStatus);
 
-    // Limit items we send to AI for prompt size (but keep originals in logs if needed)
-    const serpDataForAI = serpData.slice(0, 8);
-    const dataSummary = serpDataForAI.length > 0 ? JSON.stringify(serpDataForAI, null, 2) : 'No structured SERP item data available.';
+            // Return a structured error response
+            return res.status(502).json({
+                success: false,
+                error: 'DataForSEO API Task Failed.',
+                df_status: { 
+                    top: dataForSEOResponse.status, 
+                    task: taskStatus 
+                }
+            });
+        }
+        
+        // 3. AI ANALYSIS STEP: Analyze the SERP data
+        const serpResults = dataForSEOResponse.tasks[0].result;
+        
+        // Filter and simplify results to fit context window and focus analysis
+        const organicResults = serpResults.items
+            .filter(item => item.type === 'organic')
+            .slice(0, 10) // Limit to top 10 results
+            .map(item => ({
+                rank: item.rank_absolute,
+                title: item.title,
+                url: item.url,
+                snippet: item.snippet
+            }));
+            
+        // Construct the prompt for the AI
+        const systemPrompt = "You are a world-class SEO analyst. Analyze the provided Google SERP results for the keyword and domain requested by the user. Provide a concise, professional summary that identifies the intent of the top-ranking pages, highlights common keywords or themes used in the titles/snippets, and suggests a strategic angle for a new article to outperform the current results. The response must be a single, well-formatted paragraph.";
+        
+        const userPrompt = `Analyze the following organic search results for the keyword: "${keyword}" (Target domain: ${domain || 'None specified'}). \n\nSERP Data (JSON):\n${JSON.stringify(organicResults, null, 2)}`;
+        
+        const aiAnalysis = await callOpenAI(systemPrompt, userPrompt);
+        
+        // 4. Return combined result
+        return res.json({
+            success: true,
+            keyword: keyword,
+            domain: domain || 'N/A',
+            serpData: serpResults, // Return the full SERP data
+            aiAnalysis: aiAnalysis // Return the AI analysis
+        });
 
-    // C. ANALYZE DATA with OpenAI
-        // Use domain in the prompt ONLY if it was provided, otherwise use a placeholder
-        const targetDomain = domain || 'the search market'; 
-    const competitorDataMessage = serpDataForAI.length > 0
-      ? `The top competitor data is: ${dataSummary}`
-      : `No competitor data was found in the SERP results. Provide general, foundational SEO advice for this keyword.`;
-
-    const prompt = `Analyze the following SERP data for the keyword "${keyword}" in the context of "${targetDomain}".
-${competitorDataMessage}
-
-Provide a brief, actionable SEO strategy for this website (${targetDomain}) to rank higher.
-The output should be a single, professional paragraph.`;
-
-    // Use the OpenAI completions endpoint method you already use in production.
-    const aiResponse = await openai.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo-instruct',
-      prompt,
-      max_tokens: 300,
-    });
-
-    const analysis = aiResponse?.choices?.[0]?.text?.trim?.() || '';
-
-    // D. RETURN FINAL SINGLE RESPONSE
-    return res.status(200).json({
-      success: true,
-      domain: domain || 'N/A', // Return N/A if domain was not provided
-      keyword,
-      analysis,
-      raw_data_snippet: serpData.slice(0, 5), // trimmed payload for client
-      df_status: {
-        top: dataForSEOResponse.status_code ? { status_code: dataForSEOResponse.status_code, status_message: dataForSEOResponse.status_message } : null,
-        task: dataForSEOResponse.tasks?.[0] ? { status_code: dataForSEOResponse.tasks[0].status_code, status_message: dataForSEOResponse.tasks[0].status_message } : null
-      }
-    });
-
-  } catch (error) {
-    // Provide logs for debugging; include DataForSEO serverData if present
-    console.error("API Processing Error:", error.serverData || error.response?.data || error.message || error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to process SEO analysis.',
-      details: error.serverData || error.response?.data || error.message
-    });
-  }
+    } catch (error) {
+        console.error('API execution error:', error.message);
+        res.status(500).json({ success: false, error: 'Internal server error.' });
+    }
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Start the server (assuming your environment provides these globals)
+// app.listen(port, () => {
+//     console.log(`Server running at http://localhost:${port}`);
+// });
