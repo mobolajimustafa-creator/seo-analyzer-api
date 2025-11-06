@@ -127,10 +127,10 @@ app.get('/status', (req, res) => {
 // Core SEO Analysis Route
 app.post('/api/seo-analysis', async (req, res) => {
   const {
-    domain, // <-- REQUIRED FOR AI PROMPT, NOT DATAFORSEO API
+    domain, // <-- Domain is now OPTIONAL for validation
     keyword,
     target_country,
-    location_code: rawLocationCode = 2840, // 👈 Capture raw value
+    location_code: rawLocationCode = 2840,
     language_code = 'en',
     device = 'desktop'
   } = req.body || {};
@@ -138,15 +138,16 @@ app.post('/api/seo-analysis', async (req, res) => {
   // 1. CRITICAL FIX: Ensure location_code is an integer
   const locationCode = parseInt(rawLocationCode); 
 
-  if (!domain || !keyword) {
-    return res.status(400).json({ error: 'Domain and keyword are required.' });
+  // 2. UPDATED VALIDATION: Only keyword is strictly required for the API call
+  if (!keyword) {
+    return res.status(400).json({ error: 'Keyword is required.' });
   }
 
   try {
-    // A. FETCH DATA from DataForSEO
+    // A. FETCH DATA from DataForSEO (Endpoint: serp/google/organic/live/advanced)
     const taskPayload = {
       keyword,
-      location_code: locationCode, // 👈 Use the corrected integer value
+      location_code: locationCode, 
       language_code,
       device,
       calculate_rectangles: false,
@@ -157,9 +158,6 @@ app.post('/api/seo-analysis', async (req, res) => {
       se_type: 'organic'
     // ----------------------------------------------------------------
     };
-
-    // Console log the final payload for debugging, then remove after success
-    // console.log('Final Task Payload being sent:', JSON.stringify(taskPayload)); 
 
     const dataForSEOResponse = await callDataForSeo('serp/google/organic/live/advanced', [taskPayload], { retries: 3 });
     
@@ -181,14 +179,16 @@ app.post('/api/seo-analysis', async (req, res) => {
     const dataSummary = serpDataForAI.length > 0 ? JSON.stringify(serpDataForAI, null, 2) : 'No structured SERP item data available.';
 
     // C. ANALYZE DATA with OpenAI
+        // Use domain in the prompt ONLY if it was provided, otherwise use a placeholder
+        const targetDomain = domain || 'the search market'; 
     const competitorDataMessage = serpDataForAI.length > 0
       ? `The top competitor data is: ${dataSummary}`
       : `No competitor data was found in the SERP results. Provide general, foundational SEO advice for this keyword.`;
 
-    const prompt = `Analyze the following SERP data for the keyword "${keyword}" in the domain "${domain}".
+    const prompt = `Analyze the following SERP data for the keyword "${keyword}" in the context of "${targetDomain}".
 ${competitorDataMessage}
 
-Provide a brief, actionable SEO strategy for this website (${domain}) to rank higher.
+Provide a brief, actionable SEO strategy for this website (${targetDomain}) to rank higher.
 The output should be a single, professional paragraph.`;
 
     // Use the OpenAI completions endpoint method you already use in production.
@@ -203,7 +203,7 @@ The output should be a single, professional paragraph.`;
     // D. RETURN FINAL SINGLE RESPONSE
     return res.status(200).json({
       success: true,
-      domain,
+      domain: domain || 'N/A', // Return N/A if domain was not provided
       keyword,
       analysis,
       raw_data_snippet: serpData.slice(0, 5), // trimmed payload for client
