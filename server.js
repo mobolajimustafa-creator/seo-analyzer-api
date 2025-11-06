@@ -165,7 +165,10 @@ app.post('/api/seo-analysis', async (req, res) => {
     };
 
     const dataForSEOResponse = await callDataForSeo('serp/google/organic/live/advanced', [taskPayload], { retries: 3 });
-
+    // server.js — debug snippet (insert after receiving dataForSEOResponse)
+    
+    console.log('DataForSEO full response.tasks[0]:', JSON.stringify(dataForSEOResponse.tasks?.[0], null, 2));
+    
     // Log some diagnostics for Render logs
     console.log('DataForSEO response version/time/cost:', {
       version: dataForSEOResponse.version,
@@ -231,6 +234,5 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// server.js — debug snippet (insert after receiving dataForSEOResponse)
-console.log('DataForSEO full response.tasks[0]:', JSON.stringify(dataForSEOResponse.tasks?.[0], null, 2));
+
 
