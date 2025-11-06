@@ -155,7 +155,13 @@ app.post('/api/seo-analysis', async (req, res) => {
       location_code,
       language_code,
       device,
-      calculate_rectangles: false
+      calculate_rectangles: false,
+    // --- ADDED FIELDS TO FIX 40503 ERROR ---
+      api: 'serp',
+      function: 'live',
+      se: 'google',
+      se_type: 'organic'
+    // ----------------------------------------
     };
 
     const dataForSEOResponse = await callDataForSeo('serp/google/organic/live/advanced', [taskPayload], { retries: 3 });
@@ -224,3 +230,7 @@ The output should be a single, professional paragraph.`;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+// server.js — debug snippet (insert after receiving dataForSEOResponse)
+console.log('DataForSEO full response.tasks[0]:', JSON.stringify(dataForSEOResponse.tasks?.[0], null, 2));
+
